@@ -10,3 +10,7 @@ grep 'App instance exited' logfile.log | awk -F'guid | payload: ' '{print $2, $3
 
 
 grep 'App instance exited' logfile.log | sed -E 's/.*guid ([^ ]+).*"instance"=>"([^"]+)".*"cell_id"=>"([^"]+)".*"exit_description"=>"([^"]+)".*/\1,\2,\3,"\4"/'
+
+Try querying historical logs or audit events:
+cf curl "/v3/audit_events?target_guid=<APP-GUID>"
+
