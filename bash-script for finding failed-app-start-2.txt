@@ -1,0 +1,38 @@
+#!/bin/bash
+
+echo "🔍 Scanning for apps that never started or failed to stage..."
+
+# Get all apps (handle pagination separately if needed)
+cf curl /v3/apps | jq -c '.resources[]' | while read -r app; do
+    APP_GUID=$(echo "$app" | jq -r '.guid')
+    APP_NAME=$(echo "$app" | jq -r '.name')
+    APP_STATE=$(echo "$app" | jq -r '.state')
+    SPACE_GUID=$(echo "$app" | jq -r '.relationships.space.data.guid')
+
+    # Get build info (last staged build)
+    BUILDS=$(cf curl "/v3/apps/${APP_GUID}/builds" | jq -c '.resources')
+    LAST_BUILD=$(echo "$BUILDS" | jq -c 'sort_by(.created_at) | last')
+
+    # Extract staging error if present
+    STAGING_ERROR=$(echo "$LAST_BUILD" | jq -r '.error.message // empty')
+
+    # Get process stats
+    STATS=$(cf curl "/v3/apps/${APP_GUID}/processes/web/stats")
+    INSTANCE_COUNT=$(echo "$STATS" | jq '.resources | length')
+
+    # Check if app has no running instances or staging error
+    if [[ "$INSTANCE_COUNT" -eq 0 || -n "$STAGING_ERROR" ]]; then
+        # Lookup space/org
+        SPACE_JSON=$(cf curl /v3/spaces/$SPACE_GUID)
+        SPACE_NAME=$(echo "$SPACE_JSON" | jq -r '.name')
+        ORG_GUID=$(echo "$SPACE_JSON" | jq -r '.relationships.organization.data.guid')
+        ORG_NAME=$(cf curl /v3/organizations/$ORG_GUID | jq -r '.name')
+
+        echo "⚠️ App: $APP_NAME"
+        echo "   GUID: $APP_GUID"
+        echo "   Org/Space: $ORG_NAME / $SPACE_NAME"
+        echo "   State: $APP_STATE"
+        echo "   Reason: ${STAGING_ERROR:-No running instance or unknown failure}"
+        echo ""
+    fi
+done
