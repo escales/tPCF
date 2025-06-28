@@ -14,3 +14,6 @@ grep 'App instance exited' logfile.log | sed -E 's/.*guid ([^ ]+).*"instance"=>"
 Try querying historical logs or audit events:
 cf curl "/v3/audit_events?target_guid=<APP-GUID>"
 
+
+
+
