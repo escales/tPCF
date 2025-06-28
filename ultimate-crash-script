@@ -1,0 +1,56 @@
+#!/bin/bash
+
+echo "🧪 Finding apps that failed to start or stage (TAS 6 Crash Diagnosis)..."
+
+cf curl /v3/apps | jq -c '.resources[]' | while read -r app; do
+    APP_GUID=$(echo "$app" | jq -r '.guid')
+    APP_NAME=$(echo "$app" | jq -r '.name')
+    APP_STATE=$(echo "$app" | jq -r '.state')
+    SPACE_GUID=$(echo "$app" | jq -r '.relationships.space.data.guid')
+
+    # Get org/space info
+    SPACE_JSON=$(cf curl /v3/spaces/$SPACE_GUID)
+    SPACE_NAME=$(echo "$SPACE_JSON" | jq -r '.name')
+    ORG_GUID=$(echo "$SPACE_JSON" | jq -r '.relationships.organization.data.guid')
+    ORG_NAME=$(cf curl /v3/organizations/$ORG_GUID | jq -r '.name')
+
+    ############################
+    ## 1. Get Staging Error
+    ############################
+    BUILDS_JSON=$(cf curl "/v3/apps/${APP_GUID}/builds")
+    BUILD_COUNT=$(echo "$BUILDS_JSON" | jq '.pagination.total_results')
+
+    STAGING_ERROR=""
+    if [ "$BUILD_COUNT" -gt 0 ]; then
+        LAST_BUILD=$(echo "$BUILDS_JSON" | jq -c '.resources | sort_by(.created_at) | last')
+        STAGING_ERROR=$(echo "$LAST_BUILD" | jq -r '.error.message // ""')
+    fi
+
+    ############################
+    ## 2. Get Crash Log from v2
+    ############################
+    EXIT_DESCRIPTION=""
+    V2_APP_JSON=$(cf curl /v2/apps/$APP_GUID)
+
+    DETECT_INSTANCES=$(cf curl /v2/apps/$APP_GUID/instances 2>/dev/null)
+    if echo "$DETECT_INSTANCES" | jq -e 'type=="object"' > /dev/null 2>&1; then
+        EXIT_DESCRIPTION=$(echo "$DETECT_INSTANCES" | jq -r 'to_entries[]?.value?.exit_description' | grep -v null | head -n 1)
+    fi
+
+    ############################
+    ## 3. Print result if any issue
+    ############################
+    if [[ -n "$STAGING_ERROR" || -n "$EXIT_DESCRIPTION" ]]; then
+        echo "⚠️ App: $APP_NAME"
+        echo "   GUID: $APP_GUID"
+        echo "   Org/Space: $ORG_NAME / $SPACE_NAME"
+        echo "   State: $APP_STATE"
+        if [[ -n "$STAGING_ERROR" ]]; then
+            echo "   ❌ Staging Error: $STAGING_ERROR"
+        fi
+        if [[ -n "$EXIT_DESCRIPTION" ]]; then
+            echo "   💥 Crash Reason: $EXIT_DESCRIPTION"
+        fi
+        echo ""
+    fi
+done
