@@ -1,0 +1,31 @@
+#!/bin/bash
+
+echo "🔍 Scanning for apps that never started or failed to stage..."
+
+# Get all apps (this might be paginated if many apps)
+cf curl /v3/apps | jq -c '.resources[]' | while read -r app; do
+    APP_GUID=$(echo "$app" | jq -r '.guid')
+    APP_NAME=$(echo "$app" | jq -r '.name')
+    APP_STATE=$(echo "$app" | jq -r '.state')
+    SPACE_GUID=$(echo "$app" | jq -r '.relationships.space.data.guid')
+
+    # Get process stats for the app
+    STATS=$(cf curl "/v3/apps/${APP_GUID}/processes/web/stats")
+
+    # If no instance is present in stats or shows 0 uptime, it's never started
+    INSTANCE_COUNT=$(echo "$STATS" | jq '.resources | length')
+    
+    if [[ "$INSTANCE_COUNT" -eq 0 ]]; then
+        # Lookup space/org
+        SPACE_JSON=$(cf curl /v3/spaces/$SPACE_GUID)
+        SPACE_NAME=$(echo "$SPACE_JSON" | jq -r '.name')
+        ORG_GUID=$(echo "$SPACE_JSON" | jq -r '.relationships.organization.data.guid')
+        ORG_NAME=$(cf curl /v3/organizations/$ORG_GUID | jq -r '.name')
+
+        echo "⚠️ App: $APP_NAME"
+        echo "   GUID: $APP_GUID"
+        echo "   Org/Space: $ORG_NAME / $SPACE_NAME"
+        echo "   State: $APP_STATE (likely never started)"
+        echo ""
+    fi
+done
