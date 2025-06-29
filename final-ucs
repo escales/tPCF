@@ -1,31 +1,54 @@
 #!/bin/bash
 
-echo "🧪 Scanning for crash/staging failures using cf events..."
+echo "🧪 Checking all TAS apps for staging failures, crash loops, or no droplets..."
 
-cf curl /v3/apps | jq -c '.resources[]' | while read -r app; do
+cf curl /v3/apps?per_page=100 | jq -c '.resources[]' | while read -r app; do
     APP_GUID=$(echo "$app" | jq -r '.guid')
     APP_NAME=$(echo "$app" | jq -r '.name')
+    APP_STATE=$(echo "$app" | jq -r '.state')
     SPACE_GUID=$(echo "$app" | jq -r '.relationships.space.data.guid')
 
-    # Get org and space info
+    # Get org/space
     SPACE_JSON=$(cf curl /v3/spaces/$SPACE_GUID)
     SPACE_NAME=$(echo "$SPACE_JSON" | jq -r '.name')
     ORG_GUID=$(echo "$SPACE_JSON" | jq -r '.relationships.organization.data.guid')
     ORG_NAME=$(cf curl /v3/organizations/$ORG_GUID | jq -r '.name')
 
-    echo "🔎 Checking: $APP_NAME ($ORG_NAME / $SPACE_NAME)"
+    ############################
+    ## 1. Get droplet (staging) status
+    ############################
+    APP_DETAILS=$(cf curl /v3/apps/$APP_GUID)
+    DROPLET_GUID=$(echo "$APP_DETAILS" | jq -r '.relationships.current_droplet.data.guid // empty')
 
-    # Get recent events for the app (will show crash/staging failures)
-    EVENTS=$(cf events "$APP_NAME" 2>/dev/null)
+    ############################
+    ## 2. Check build errors
+    ############################
+    BUILD_ERROR=""
+    BUILDS=$(cf curl /v3/apps/$APP_GUID/builds)
+    if echo "$BUILDS" | jq -e 'has("resources")' >/dev/null 2>&1; then
+        LAST_BUILD=$(echo "$BUILDS" | jq -c '.resources | sort_by(.created_at) | last')
+        if echo "$LAST_BUILD" | jq -e 'has("error") and .error != null and .error | type == "object" and has("message")' >/dev/null 2>&1; then
+            BUILD_ERROR=$(echo "$LAST_BUILD" | jq -r '.error.message')
+        fi
+    fi
 
-    if echo "$EVENTS" | grep -qi 'exit description\|no space left on device\|failed to create container'; then
-        echo "⚠️  App: $APP_NAME"
+    ############################
+    ## 3. Check if process ever started
+    ############################
+    STATS=$(cf curl /v3/apps/${APP_GUID}/processes/web/stats)
+    INSTANCE_COUNT=$(echo "$STATS" | jq '.resources | length')
+
+    ############################
+    ## 4. Decision logic
+    ############################
+    if [[ -z "$DROPLET_GUID" || "$INSTANCE_COUNT" -eq 0 || -n "$BUILD_ERROR" ]]; then
+        echo "⚠️ App: $APP_NAME"
+        echo "   GUID: $APP_GUID"
         echo "   Org/Space: $ORG_NAME / $SPACE_NAME"
-        echo "   Events:"
-        echo "$EVENTS" | grep -i 'exit description\|no space left on device\|failed to create container'
-        echo ""
-    else
-        echo "✅ No recent fatal events found for $APP_NAME"
+        echo "   State: $APP_STATE"
+        [[ -z "$DROPLET_GUID" ]] && echo "   ❌ No droplet (staging likely failed)"
+        [[ "$INSTANCE_COUNT" -eq 0 ]] && echo "   💤 No running instances (never started or crash loop)"
+        [[ -n "$BUILD_ERROR" ]] && echo "   🔥 Staging error: $BUILD_ERROR"
         echo ""
     fi
 done
