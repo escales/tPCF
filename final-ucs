@@ -1,15 +1,14 @@
 #!/bin/bash
 
-echo "🧪 Finding TAS 6 apps that failed to start or stage..."
+echo "🧪 Scanning for TAS 6 apps that failed to start or stage..."
 
-# Get the full list of apps
 cf curl /v3/apps | jq -c '.resources[]' | while read -r app; do
     APP_GUID=$(echo "$app" | jq -r '.guid')
     APP_NAME=$(echo "$app" | jq -r '.name')
     APP_STATE=$(echo "$app" | jq -r '.state')
     SPACE_GUID=$(echo "$app" | jq -r '.relationships.space.data.guid')
 
-    # Get org and space info
+    # Get org/space
     SPACE_JSON=$(cf curl /v3/spaces/$SPACE_GUID)
     SPACE_NAME=$(echo "$SPACE_JSON" | jq -r '.name')
     ORG_GUID=$(echo "$SPACE_JSON" | jq -r '.relationships.organization.data.guid')
@@ -17,42 +16,38 @@ cf curl /v3/apps | jq -c '.resources[]' | while read -r app; do
     ORG_NAME=$(echo "$ORG_JSON" | jq -r '.name')
 
     ############################
-    ## 1. Check Staging Error
+    ## 1. Get staging error (safe check)
     ############################
     STAGING_ERROR=""
-    BUILDS_JSON=$(cf curl "/v3/apps/${APP_GUID}/builds")
+    BUILDS_RAW=$(cf curl "/v3/apps/${APP_GUID}/builds")
 
-    if echo "$BUILDS_JSON" | jq -e 'has("resources")' >/dev/null 2>&1; then
-        LAST_BUILD=$(echo "$BUILDS_JSON" | jq -c '.resources | sort_by(.created_at) | last')
-        if echo "$LAST_BUILD" | jq -e 'has("error")' >/dev/null 2>&1; then
+    if echo "$BUILDS_RAW" | jq -e 'type == "object"' >/dev/null 2>&1 && echo "$BUILDS_RAW" | jq -e 'has("resources")' >/dev/null 2>&1; then
+        LAST_BUILD=$(echo "$BUILDS_RAW" | jq -c '.resources | sort_by(.created_at) | last')
+        if echo "$LAST_BUILD" | jq -e 'type == "object"' >/dev/null 2>&1 && echo "$LAST_BUILD" | jq -e 'has("error")' >/dev/null 2>&1; then
             STAGING_ERROR=$(echo "$LAST_BUILD" | jq -r '.error.message // empty')
         fi
     fi
 
     ############################
-    ## 2. Check Crash Reason
+    ## 2. Get crash reason (safe check)
     ############################
     EXIT_DESCRIPTION=""
-    INSTANCES_RAW=$(cf curl /v2/apps/${APP_GUID}/instances 2>/dev/null)
+    INSTANCE_RAW=$(cf curl /v2/apps/${APP_GUID}/instances 2>/dev/null)
 
-    if echo "$INSTANCES_RAW" | jq -e 'type=="object"' >/dev/null 2>&1; then
-        EXIT_DESCRIPTION=$(echo "$INSTANCES_RAW" | jq -r 'to_entries[]?.value?.exit_description // empty' | grep -v null | head -n 1)
+    if echo "$INSTANCE_RAW" | jq -e 'type == "object"' >/dev/null 2>&1; then
+        EXIT_DESCRIPTION=$(echo "$INSTANCE_RAW" | jq -r 'to_entries[]?.value?.exit_description // empty' | grep -v null | head -n 1)
     fi
 
     ############################
-    ## 3. Report only if errors exist
+    ## 3. Only show errors
     ############################
     if [[ -n "$STAGING_ERROR" || -n "$EXIT_DESCRIPTION" ]]; then
         echo "⚠️ App: $APP_NAME"
         echo "   GUID: $APP_GUID"
         echo "   Org/Space: $ORG_NAME / $SPACE_NAME"
         echo "   State: $APP_STATE"
-        if [[ -n "$STAGING_ERROR" ]]; then
-            echo "   ❌ Staging Error: $STAGING_ERROR"
-        fi
-        if [[ -n "$EXIT_DESCRIPTION" ]]; then
-            echo "   💥 Crash Reason: $EXIT_DESCRIPTION"
-        fi
+        [[ -n "$STAGING_ERROR" ]] && echo "   ❌ Staging Error: $STAGING_ERROR"
+        [[ -n "$EXIT_DESCRIPTION" ]] && echo "   💥 Crash Reason: $EXIT_DESCRIPTION"
         echo ""
     fi
 done
