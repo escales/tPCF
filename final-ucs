@@ -1,47 +1,31 @@
 #!/bin/bash
 
-echo "🧪 Scanning all TAS 6 apps for startup/staging failures..."
+echo "🧪 Scanning for crash/staging failures using cf events..."
 
 cf curl /v3/apps | jq -c '.resources[]' | while read -r app; do
     APP_GUID=$(echo "$app" | jq -r '.guid')
     APP_NAME=$(echo "$app" | jq -r '.name')
-    echo "🔎 Checking app: $APP_NAME"
-
-    # Get org/space info
     SPACE_GUID=$(echo "$app" | jq -r '.relationships.space.data.guid')
-    SPACE_NAME=$(cf curl /v3/spaces/$SPACE_GUID | jq -r '.name')
-    ORG_GUID=$(cf curl /v3/spaces/$SPACE_GUID | jq -r '.relationships.organization.data.guid')
+
+    # Get org and space info
+    SPACE_JSON=$(cf curl /v3/spaces/$SPACE_GUID)
+    SPACE_NAME=$(echo "$SPACE_JSON" | jq -r '.name')
+    ORG_GUID=$(echo "$SPACE_JSON" | jq -r '.relationships.organization.data.guid')
     ORG_NAME=$(cf curl /v3/organizations/$ORG_GUID | jq -r '.name')
 
-    APP_STATE=$(echo "$app" | jq -r '.state')
-    STAGING_ERROR=""
-    EXIT_DESCRIPTION=""
+    echo "🔎 Checking: $APP_NAME ($ORG_NAME / $SPACE_NAME)"
 
-    # Get build info
-    BUILDS_RAW=$(cf curl "/v3/apps/${APP_GUID}/builds")
-    if echo "$BUILDS_RAW" | jq -e 'has("resources")' >/dev/null 2>&1; then
-        LAST_BUILD=$(echo "$BUILDS_RAW" | jq -c '.resources | sort_by(.created_at) | last')
-        echo "🛠️  Build found for $APP_NAME"
+    # Get recent events for the app (will show crash/staging failures)
+    EVENTS=$(cf events "$APP_NAME" 2>/dev/null)
 
-        STAGING_ERROR=$(echo "$LAST_BUILD" | jq -r '.error.message // empty' 2>/dev/null)
-    fi
-
-    # Get crash reason
-    INSTANCE_RAW=$(cf curl /v2/apps/${APP_GUID}/instances 2>/dev/null)
-    if echo "$INSTANCE_RAW" | jq -e 'type=="object"' >/dev/null 2>&1; then
-        EXIT_DESCRIPTION=$(echo "$INSTANCE_RAW" | jq -r 'try to_entries[]?.value?.exit_description // empty' 2>/dev/null | grep -v null | head -n 1)
-    fi
-
-    # Show only apps with any known problem
-    if [[ -n "$STAGING_ERROR" || -n "$EXIT_DESCRIPTION" ]]; then
-        echo "⚠️ App: $APP_NAME"
-        echo "   GUID: $APP_GUID"
+    if echo "$EVENTS" | grep -qi 'exit description\|no space left on device\|failed to create container'; then
+        echo "⚠️  App: $APP_NAME"
         echo "   Org/Space: $ORG_NAME / $SPACE_NAME"
-        echo "   State: $APP_STATE"
-        [[ -n "$STAGING_ERROR" ]] && echo "   ❌ Staging Error: $STAGING_ERROR"
-        [[ -n "$EXIT_DESCRIPTION" ]] && echo "   💥 Crash Reason: $EXIT_DESCRIPTION"
+        echo "   Events:"
+        echo "$EVENTS" | grep -i 'exit description\|no space left on device\|failed to create container'
         echo ""
     else
-        echo "✅ $APP_NAME is clean (no staging or crash issues)"
+        echo "✅ No recent fatal events found for $APP_NAME"
+        echo ""
     fi
 done
