@@ -1,0 +1,107 @@
+#!/bin/bash
+
+echo "🧪 Scanning TAS apps for failures and saving to JSON..."
+
+API_URL="/v3/apps?per_page=100"
+APP_COUNTER=0
+MATCH_COUNTER=0
+
+# Create an empty JSON array
+echo "[]" > failed_apps.json
+
+while [[ -n "$API_URL" && "$API_URL" != "null" ]]; do
+    RESPONSE=$(cf curl "$API_URL")
+    APPS=$(echo "$RESPONSE" | jq -c '.resources[]')
+    NEXT_URL=$(echo "$RESPONSE" | jq -r '.pagination.next.href // empty' | sed 's|https://[^/]*/||')
+
+    echo "$APPS" | while read -r app; do
+        APP_COUNTER=$((APP_COUNTER + 1))
+
+        APP_GUID=$(echo "$app" | jq -r '.guid')
+        APP_NAME=$(echo "$app" | jq -r '.name')
+        APP_STATE=$(echo "$app" | jq -r '.state')
+        SPACE_GUID=$(echo "$app" | jq -r '.relationships.space.data.guid')
+
+        printf "🔄 [%04d] Checking %-40s ... " "$APP_COUNTER" "$APP_NAME"
+
+        # Get space/org info
+        SPACE_JSON=$(cf curl /v3/spaces/$SPACE_GUID)
+        SPACE_NAME=$(echo "$SPACE_JSON" | jq -r '.name')
+        ORG_GUID=$(echo "$SPACE_JSON" | jq -r '.relationships.organization.data.guid')
+        ORG_NAME=$(cf curl /v3/organizations/$ORG_GUID | jq -r '.name')
+
+        APP_DETAILS=$(cf curl /v3/apps/$APP_GUID)
+        DROPLET_GUID=$(echo "$APP_DETAILS" | jq -r '.relationships.current_droplet.data.guid // empty')
+
+        ############################
+        ## 1. Check staging error and timestamp
+        ############################
+        BUILD_ERROR=""
+        ERROR_TIME=""
+        BUILDS=$(cf curl /v3/apps/$APP_GUID/builds)
+        if echo "$BUILDS" | jq -e 'has("resources")' >/dev/null 2>&1; then
+            LAST_BUILD=$(echo "$BUILDS" | jq -c '.resources | sort_by(.created_at) | last')
+            if echo "$LAST_BUILD" | jq -e '.error.message' >/dev/null 2>&1; then
+                BUILD_ERROR=$(echo "$LAST_BUILD" | jq -r '.error.message')
+                ERROR_UTC=$(echo "$LAST_BUILD" | jq -r '.created_at')
+                ERROR_TIME=$(TZ="America/Chicago" date -d "$ERROR_UTC" +"%Y-%m-%d %I:%M:%S %p CST" 2>/dev/null)
+            fi
+        fi
+
+        ############################
+        ## 2. Check for crash (exit_description)
+        ############################
+        EXIT_DESCRIPTION=""
+        EXIT_TIME=""
+        STATS=$(cf curl /v3/apps/${APP_GUID}/processes/web/stats)
+        if echo "$STATS" | jq -e 'has("resources")' >/dev/null 2>&1; then
+            EXIT_DESCRIPTION=$(echo "$STATS" | jq -r '.resources[]?.details // empty' | grep -i "no space" | head -n 1)
+            [[ -n "$EXIT_DESCRIPTION" ]] && EXIT_TIME=$(TZ="America/Chicago" date +"%Y-%m-%d %I:%M:%S %p CST")
+        fi
+
+        ############################
+        ## 3. Only report failures
+        ############################
+        if [[ -z "$DROPLET_GUID" || -n "$BUILD_ERROR" || -n "$EXIT_DESCRIPTION" ]]; then
+            MATCH_COUNTER=$((MATCH_COUNTER + 1))
+
+            # Create JSON object
+            JSON_OBJ=$(jq -n \
+                --arg name "$APP_NAME" \
+                --arg guid "$APP_GUID" \
+                --arg org "$ORG_NAME" \
+                --arg space "$SPACE_NAME" \
+                --arg state "$APP_STATE" \
+                --arg droplet "$DROPLET_GUID" \
+                --arg error "$BUILD_ERROR" \
+                --arg error_time "$ERROR_TIME" \
+                --arg crash "$EXIT_DESCRIPTION" \
+                --arg crash_time "$EXIT_TIME" \
+                '{
+                    app_name: $name,
+                    guid: $guid,
+                    org: $org,
+                    space: $space,
+                    state: $state,
+                    droplet_assigned: ($droplet != ""),
+                    staging_error: ($error // null),
+                    staging_error_time: ($error_time // null),
+                    crash_reason: ($crash // null),
+                    crash_time: ($crash_time // null)
+                }')
+
+            # Append to JSON file
+            TMP=$(mktemp)
+            jq ". += [$JSON_OBJ]" failed_apps.json > "$TMP" && mv "$TMP" failed_apps.json
+
+            echo "🚨 Issue saved"
+        else
+            echo "OK"
+        fi
+    done
+
+    API_URL="$NEXT_URL"
+done
+
+echo ""
+echo "✅ Scan complete: $APP_COUNTER apps checked, $MATCH_COUNTER issues saved to failed_apps.json"
