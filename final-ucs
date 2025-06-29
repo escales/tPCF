@@ -1,0 +1,51 @@
+#!/bin/bash
+
+echo "🧪 Finding TAS 6 apps that failed to start or stage..."
+
+# Get the full list of apps
+cf curl /v3/apps | jq -c '.resources[]' | while read -r app; do
+    APP_GUID=$(echo "$app" | jq -r '.guid')
+    APP_NAME=$(echo "$app" | jq -r '.name')
+    APP_STATE=$(echo "$app" | jq -r '.state')
+    SPACE_GUID=$(echo "$app" | jq -r '.relationships.space.data.guid')
+
+    # Get org and space info
+    SPACE_JSON=$(cf curl /v3/spaces/$SPACE_GUID)
+    SPACE_NAME=$(echo "$SPACE_JSON" | jq -r '.name')
+    ORG_GUID=$(echo "$SPACE_JSON" | jq -r '.relationships.organization.data.guid')
+    ORG_JSON=$(cf curl /v3/organizations/$ORG_GUID)
+    ORG_NAME=$(echo "$ORG_JSON" | jq -r '.name')
+
+    ############################
+    ## 1. Check Staging Error
+    ############################
+    STAGING_ERROR=""
+    BUILDS_JSON=$(cf curl "/v3/apps/${APP_GUID}/builds")
+
+    if echo "$BUILDS_JSON" | jq -e 'has("resources")' >/dev/null 2>&1; then
+        LAST_BUILD=$(echo "$BUILDS_JSON" | jq -c '.resources | sort_by(.created_at) | last')
+        if echo "$LAST_BUILD" | jq -e 'has("error")' >/dev/null 2>&1; then
+            STAGING_ERROR=$(echo "$LAST_BUILD" | jq -r '.error.message // empty')
+        fi
+    fi
+
+    ############################
+    ## 2. Check Crash Reason
+    ############################
+    EXIT_DESCRIPTION=""
+    INSTANCES_RAW=$(cf curl /v2/apps/${APP_GUID}/instances 2>/dev/null)
+
+    if echo "$INSTANCES_RAW" | jq -e 'type=="object"' >/dev/null 2>&1; then
+        EXIT_DESCRIPTION=$(echo "$INSTANCES_RAW" | jq -r 'to_entries[]?.value?.exit_description // empty' | grep -v null | head -n 1)
+    fi
+
+    ############################
+    ## 3. Report only if errors exist
+    ############################
+    if [[ -n "$STAGING_ERROR" || -n "$EXIT_DESCRIPTION" ]]; then
+        echo "⚠️ App: $APP_NAME"
+        echo "   GUID: $APP_GUID"
+        echo "   Org/Space: $ORG_NAME / $SPACE_NAME"
+        echo "   State: $APP_STATE"
+        if [[ -n "$STAGING_ERROR" ]]; then
+            echo "
