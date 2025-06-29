@@ -1,0 +1,63 @@
+#!/bin/bash
+
+echo "🧪 Scanning all TAS apps for 'no space' errors (staging/crash)..."
+
+API_URL="/v3/apps?per_page=100"
+while [[ -n "$API_URL" && "$API_URL" != "null" ]]; do
+    # Fetch one page of apps
+    RESPONSE=$(cf curl "$API_URL")
+    APPS=$(echo "$RESPONSE" | jq -c '.resources[]')
+    NEXT_URL=$(echo "$RESPONSE" | jq -r '.pagination.next.href // empty' | sed 's|https://[^/]*/||')
+
+    echo "$APPS" | while read -r app; do
+        APP_GUID=$(echo "$app" | jq -r '.guid')
+        APP_NAME=$(echo "$app" | jq -r '.name')
+        APP_STATE=$(echo "$app" | jq -r '.state')
+        SPACE_GUID=$(echo "$app" | jq -r '.relationships.space.data.guid')
+
+        # Get org/space
+        SPACE_JSON=$(cf curl /v3/spaces/$SPACE_GUID)
+        SPACE_NAME=$(echo "$SPACE_JSON" | jq -r '.name')
+        ORG_GUID=$(echo "$SPACE_JSON" | jq -r '.relationships.organization.data.guid')
+        ORG_NAME=$(cf curl /v3/organizations/$ORG_GUID | jq -r '.name')
+
+        ############################
+        ## 1. Check for staging errors
+        ############################
+        BUILD_ERROR=""
+        BUILDS=$(cf curl /v3/apps/$APP_GUID/builds)
+        if echo "$BUILDS" | jq -e 'has("resources")' >/dev/null 2>&1; then
+            LAST_BUILD=$(echo "$BUILDS" | jq -c '.resources | sort_by(.created_at) | last')
+            if echo "$LAST_BUILD" | jq -e 'has("error") and .error != null and .error | type == "object" and has("message")' >/dev/null 2>&1; then
+                BUILD_ERROR=$(echo "$LAST_BUILD" | jq -r '.error.message')
+            fi
+        fi
+
+        ############################
+        ## 2. Check crash exit_description
+        ############################
+        EXIT_DESCRIPTION=""
+        STATS=$(cf curl /v3/apps/${APP_GUID}/processes/web/stats)
+        if echo "$STATS" | jq -e 'has("resources")' >/dev/null 2>&1; then
+            EXIT_DESCRIPTION=$(echo "$STATS" | jq -r '.resources[]?.details // empty' | grep -i "no space" | head -n 1)
+        fi
+
+        ############################
+        ## 3. Show only if "no space" is in either
+        ############################
+        MATCH=$(echo -e "$BUILD_ERROR\n$EXIT_DESCRIPTION" | grep -i "no space")
+
+        if [[ -n "$MATCH" ]]; then
+            echo "🚨 App: $APP_NAME"
+            echo "   GUID: $APP_GUID"
+            echo "   Org/Space: $ORG_NAME / $SPACE_NAME"
+            echo "   State: $APP_STATE"
+            [[ -n "$BUILD_ERROR" ]] && echo "   🔥 Staging Error: $BUILD_ERROR"
+            [[ -n "$EXIT_DESCRIPTION" ]] && echo "   💥 Crash Reason: $EXIT_DESCRIPTION"
+            echo ""
+        fi
+    done
+
+    # Move to next page
+    API_URL="$NEXT_URL"
+done
