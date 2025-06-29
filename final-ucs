@@ -48,4 +48,11 @@ cf curl /v3/apps | jq -c '.resources[]' | while read -r app; do
         echo "   Org/Space: $ORG_NAME / $SPACE_NAME"
         echo "   State: $APP_STATE"
         if [[ -n "$STAGING_ERROR" ]]; then
-            echo "
+            echo "   ❌ Staging Error: $STAGING_ERROR"
+        fi
+        if [[ -n "$EXIT_DESCRIPTION" ]]; then
+            echo "   💥 Crash Reason: $EXIT_DESCRIPTION"
+        fi
+        echo ""
+    fi
+done
