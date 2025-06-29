@@ -1,54 +1,88 @@
 #!/bin/bash
 
-echo "🧪 Checking all TAS apps for staging failures, crash loops, or no droplets..."
+echo "🧪 Scanning TAS apps for staging failures, crash loops, or missing droplets..."
+echo
 
-cf curl /v3/apps?per_page=100 | jq -c '.resources[]' | while read -r app; do
-    APP_GUID=$(echo "$app" | jq -r '.guid')
-    APP_NAME=$(echo "$app" | jq -r '.name')
-    APP_STATE=$(echo "$app" | jq -r '.state')
-    SPACE_GUID=$(echo "$app" | jq -r '.relationships.space.data.guid')
+API_URL="/v3/apps?per_page=100"
+APP_COUNTER=0
+MATCH_COUNTER=0
 
-    # Get org/space
-    SPACE_JSON=$(cf curl /v3/spaces/$SPACE_GUID)
-    SPACE_NAME=$(echo "$SPACE_JSON" | jq -r '.name')
-    ORG_GUID=$(echo "$SPACE_JSON" | jq -r '.relationships.organization.data.guid')
-    ORG_NAME=$(cf curl /v3/organizations/$ORG_GUID | jq -r '.name')
+while [[ -n "$API_URL" && "$API_URL" != "null" ]]; do
+    RESPONSE=$(cf curl "$API_URL")
+    APPS=$(echo "$RESPONSE" | jq -c '.resources[]')
+    NEXT_URL=$(echo "$RESPONSE" | jq -r '.pagination.next.href // empty' | sed 's|https://[^/]*/||')
 
-    ############################
-    ## 1. Get droplet (staging) status
-    ############################
-    APP_DETAILS=$(cf curl /v3/apps/$APP_GUID)
-    DROPLET_GUID=$(echo "$APP_DETAILS" | jq -r '.relationships.current_droplet.data.guid // empty')
+    echo "$APPS" | while read -r app; do
+        APP_COUNTER=$((APP_COUNTER + 1))
 
-    ############################
-    ## 2. Check build errors
-    ############################
-    BUILD_ERROR=""
-    BUILDS=$(cf curl /v3/apps/$APP_GUID/builds)
-    if echo "$BUILDS" | jq -e 'has("resources")' >/dev/null 2>&1; then
-        LAST_BUILD=$(echo "$BUILDS" | jq -c '.resources | sort_by(.created_at) | last')
-        if echo "$LAST_BUILD" | jq -e 'has("error") and .error != null and .error | type == "object" and has("message")' >/dev/null 2>&1; then
-            BUILD_ERROR=$(echo "$LAST_BUILD" | jq -r '.error.message')
+        APP_GUID=$(echo "$app" | jq -r '.guid')
+        APP_NAME=$(echo "$app" | jq -r '.name')
+        APP_STATE=$(echo "$app" | jq -r '.state')
+        SPACE_GUID=$(echo "$app" | jq -r '.relationships.space.data.guid')
+
+        printf "🔄 [%04d] Checking %-40s ... " "$APP_COUNTER" "$APP_NAME"
+
+        # Get space/org info
+        SPACE_JSON=$(cf curl /v3/spaces/$SPACE_GUID)
+        SPACE_NAME=$(echo "$SPACE_JSON" | jq -r '.name')
+        ORG_GUID=$(echo "$SPACE_JSON" | jq -r '.relationships.organization.data.guid')
+        ORG_JSON=$(cf curl /v3/organizations/$ORG_GUID)
+        ORG_NAME=$(echo "$ORG_JSON" | jq -r '.name')
+
+        ############################
+        ## 1. Check droplet presence
+        ############################
+        APP_DETAILS=$(cf curl /v3/apps/$APP_GUID)
+        DROPLET_GUID=$(echo "$APP_DETAILS" | jq -r '.relationships.current_droplet.data.guid // empty')
+
+        ############################
+        ## 2. Check staging error and timestamp
+        ############################
+        BUILD_ERROR=""
+        ERROR_TIME=""
+        BUILDS=$(cf curl /v3/apps/$APP_GUID/builds)
+        if echo "$BUILDS" | jq -e 'has("resources")' >/dev/null 2>&1; then
+            LAST_BUILD=$(echo "$BUILDS" | jq -c '.resources | sort_by(.created_at) | last')
+            if echo "$LAST_BUILD" | jq -e 'has("error") and .error != null and .error | type == "object" and has("message")' >/dev/null 2>&1; then
+                BUILD_ERROR=$(echo "$LAST_BUILD" | jq -r '.error.message')
+                ERROR_UTC=$(echo "$LAST_BUILD" | jq -r '.created_at')
+                ERROR_TIME=$(TZ="America/Chicago" date -d "$ERROR_UTC" +"%Y-%m-%d %I:%M:%S %p CST")
+            fi
         fi
-    fi
 
-    ############################
-    ## 3. Check if process ever started
-    ############################
-    STATS=$(cf curl /v3/apps/${APP_GUID}/processes/web/stats)
-    INSTANCE_COUNT=$(echo "$STATS" | jq '.resources | length')
+        ############################
+        ## 3. Check for crash (exit_description)
+        ############################
+        EXIT_DESCRIPTION=""
+        EXIT_TIME=""
+        STATS=$(cf curl /v3/apps/${APP_GUID}/processes/web/stats)
+        if echo "$STATS" | jq -e 'has("resources")' >/dev/null 2>&1; then
+            EXIT_DESCRIPTION=$(echo "$STATS" | jq -r '.resources[]?.details // empty' | grep -i "no space" | head -n 1)
+            # Simulated time for crash (no official timestamp in /stats) – use now as placeholder
+            [[ -n "$EXIT_DESCRIPTION" ]] && EXIT_TIME=$(TZ="America/Chicago" date +"%Y-%m-%d %I:%M:%S %p CST")
+        fi
 
-    ############################
-    ## 4. Decision logic
-    ############################
-    if [[ -z "$DROPLET_GUID" || "$INSTANCE_COUNT" -eq 0 || -n "$BUILD_ERROR" ]]; then
-        echo "⚠️ App: $APP_NAME"
-        echo "   GUID: $APP_GUID"
-        echo "   Org/Space: $ORG_NAME / $SPACE_NAME"
-        echo "   State: $APP_STATE"
-        [[ -z "$DROPLET_GUID" ]] && echo "   ❌ No droplet (staging likely failed)"
-        [[ "$INSTANCE_COUNT" -eq 0 ]] && echo "   💤 No running instances (never started or crash loop)"
-        [[ -n "$BUILD_ERROR" ]] && echo "   🔥 Staging error: $BUILD_ERROR"
-        echo ""
-    fi
+        ############################
+        ## 4. Report apps with any failure
+        ############################
+        if [[ -z "$DROPLET_GUID" || -n "$BUILD_ERROR" || -n "$EXIT_DESCRIPTION" ]]; then
+            MATCH_COUNTER=$((MATCH_COUNTER + 1))
+            echo "🚨 ISSUE FOUND"
+            echo "🚨 App: $APP_NAME"
+            echo "   GUID: $APP_GUID"
+            echo "   Org/Space: $ORG_NAME / $SPACE_NAME"
+            echo "   State: $APP_STATE"
+            [[ -z "$DROPLET_GUID" ]] && echo "   ❌ No droplet assigned (staging likely failed)"
+            [[ -n "$BUILD_ERROR" ]] && echo "   🔥 Staging Error: $BUILD_ERROR" && echo "   🕒 Staging Time: $ERROR_TIME"
+            [[ -n "$EXIT_DESCRIPTION" ]] && echo "   💥 Crash Reason: $EXIT_DESCRIPTION" && echo "   🕒 Crash Time: $EXIT_TIME"
+            echo ""
+        else
+            echo "OK"
+        fi
+    done
+
+    API_URL="$NEXT_URL"
 done
+
+echo ""
+echo "✅ Scan complete: $APP_COUNTER apps checked, $MATCH_COUNTER with staging/crash issues found."
