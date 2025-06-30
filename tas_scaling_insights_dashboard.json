@@ -1,0 +1,102 @@
+{
+  "name": "TAS App Instance Scaling Insights",
+  "description": "Tracks actual vs. recommended instances with delta, alerts, and resource metrics. Powered by custom derived metric `tas.recommended.instances`.",
+  "templateVariables": [
+    {
+      "name": "foundation",
+      "defaultValue": "*",
+      "valuesToReadOnly": false
+    },
+    {
+      "name": "org",
+      "defaultValue": "*",
+      "valuesToReadOnly": false
+    },
+    {
+      "name": "space",
+      "defaultValue": "*",
+      "valuesToReadOnly": false
+    },
+    {
+      "name": "app",
+      "defaultValue": "*",
+      "valuesToReadOnly": false
+    }
+  ],
+  "panels": [
+    {
+      "name": "Actual Instance Count",
+      "chartSettings": {
+        "type": "timeseries",
+        "title": "Actual Instance Count",
+        "units": "",
+        "query": "count(ts(\"tas.container.state\", foundation=\"$foundation\", org=\"$org\", space=\"$space\", app=\"$app\", state=\"RUNNING\"))"
+      }
+    },
+    {
+      "name": "Recommended Instance Count",
+      "chartSettings": {
+        "type": "timeseries",
+        "title": "Recommended Instance Count",
+        "units": "",
+        "query": "avg(ts(\"tas.recommended.instances\", foundation=\"$foundation\", org=\"$org\", space=\"$space\", app=\"$app\"))"
+      }
+    },
+    {
+      "name": "Instance Count Delta (Recommended - Actual)",
+      "chartSettings": {
+        "type": "timeseries",
+        "title": "Instance Count Delta (Recommended - Actual)",
+        "units": "",
+        "query": "avg(ts(\"tas.recommended.instances\", foundation=\"$foundation\", org=\"$org\", space=\"$space\", app=\"$app\")) - count(ts(\"tas.container.state\", foundation=\"$foundation\", org=\"$org\", space=\"$space\", app=\"$app\", state=\"RUNNING\"))",
+        "thresholds": [
+          {
+            "gt": 1,
+            "color": "red"
+          },
+          {
+            "lt": 0,
+            "color": "yellow"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Crash Count Heatmap",
+      "chartSettings": {
+        "type": "heatmap",
+        "title": "Crash Count Heatmap",
+        "units": "",
+        "query": "ts(\"tas.container.crash.count\", foundation=\"$foundation\", org=\"$org\", space=\"$space\", app=\"$app\")"
+      }
+    },
+    {
+      "name": "CPU % per Instance",
+      "chartSettings": {
+        "type": "timeseries",
+        "title": "CPU % per Instance",
+        "units": "",
+        "query": "ts(\"tas.container.cpu.percent\", foundation=\"$foundation\", org=\"$org\", space=\"$space\", app=\"$app\")"
+      }
+    },
+    {
+      "name": "Memory % per Instance",
+      "chartSettings": {
+        "type": "timeseries",
+        "title": "Memory % per Instance",
+        "units": "",
+        "query": "ts(\"tas.container.memory.percent\", foundation=\"$foundation\", org=\"$org\", space=\"$space\", app=\"$app\")"
+      }
+    },
+    {
+      "name": "Requests per Second",
+      "chartSettings": {
+        "type": "timeseries",
+        "title": "Requests per Second",
+        "units": "",
+        "query": "rate(ts(\"tas.container.http.requests.count\", foundation=\"$foundation\", org=\"$org\", space=\"$space\", app=\"$app\"), 1m)"
+      }
+    }
+  ],
+  "created": "2025-06-30T23:27:01.673363Z"
+}

@@ -1,0 +1,8 @@
+Panel Name,Query,Description
+Actual Instance Count,"count(ts(""tas.container.state"", foundation=""$foundation"", org=""$org"", space=""$space"", app=""$app"", state=""RUNNING""))",Total number of running app instances
+Recommended Instance Count,"avg(ts(""tas.recommended.instances"", foundation=""$foundation"", org=""$org"", space=""$space"", app=""$app""))",Derived metric indicating suggested number of instances
+Instance Count Delta (Recommended - Actual),"avg(ts(""tas.recommended.instances"", foundation=""$foundation"", org=""$org"", space=""$space"", app=""$app"")) - count(ts(""tas.container.state"", foundation=""$foundation"", org=""$org"", space=""$space"", app=""$app"", state=""RUNNING""))","Gap between recommended and actual instances. Red if underprovisioned (>1), yellow if negative delta"
+Crash Count Heatmap,"ts(""tas.container.crash.count"", foundation=""$foundation"", org=""$org"", space=""$space"", app=""$app"")",Heatmap view of instance crashes
+CPU % per Instance,"ts(""tas.container.cpu.percent"", foundation=""$foundation"", org=""$org"", space=""$space"", app=""$app"")",CPU usage per app instance
+Memory % per Instance,"ts(""tas.container.memory.percent"", foundation=""$foundation"", org=""$org"", space=""$space"", app=""$app"")",Memory usage per app instance
+Requests per Second,"rate(ts(""tas.container.http.requests.count"", foundation=""$foundation"", org=""$org"", space=""$space"", app=""$app""), 1m)",Throughput of requests per second
