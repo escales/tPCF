@@ -1,0 +1,172 @@
+{
+  "name": "TAS App Scaling Insights",
+  "description": "Tracks actual vs. recommended instance counts with deltas, crashes, CPU/memory, and RPS.",
+  "templateVariables": [
+    {
+      "name": "foundation",
+      "value": "*"
+    },
+    {
+      "name": "org",
+      "value": "*"
+    },
+    {
+      "name": "space",
+      "value": "*"
+    },
+    {
+      "name": "app",
+      "value": "*"
+    }
+  ],
+  "eventFilterType": "SHOW_ALL",
+  "tags": [],
+  "sections": [
+    {
+      "name": "Instance Count & Delta",
+      "rows": [
+        [
+          {
+            "name": "Actual Instance Count",
+            "description": "",
+            "sources": [
+              {
+                "query": "count(ts(\"tas.container.state\", foundation=\"$foundation\", org=\"$org\", space=\"$space\", app=\"$app\", state=\"RUNNING\"))",
+                "name": "Actual Instance Count",
+                "queryType": "metric"
+              }
+            ],
+            "displaySettings": {
+              "displayType": "number",
+              "units": ""
+            },
+            "id": "f1685a91-9485-405a-8001-657c61e10bb7",
+            "thresholds": []
+          },
+          {
+            "name": "Recommended Instance Count",
+            "description": "",
+            "sources": [
+              {
+                "query": "avg(ts(\"tas.recommended.instances\", foundation=\"$foundation\", org=\"$org\", space=\"$space\", app=\"$app\"))",
+                "name": "Recommended Instance Count",
+                "queryType": "metric"
+              }
+            ],
+            "displaySettings": {
+              "displayType": "number",
+              "units": ""
+            },
+            "id": "9cb327cd-e2d5-469a-b2f3-603ee2f105ad",
+            "thresholds": []
+          },
+          {
+            "name": "Instance Count Delta",
+            "description": "",
+            "sources": [
+              {
+                "query": "avg(ts(\"tas.recommended.instances\", foundation=\"$foundation\", org=\"$org\", space=\"$space\", app=\"$app\")) - count(ts(\"tas.container.state\", foundation=\"$foundation\", org=\"$org\", space=\"$space\", app=\"$app\", state=\"RUNNING\"))",
+                "name": "Instance Count Delta",
+                "queryType": "metric"
+              }
+            ],
+            "displaySettings": {
+              "displayType": "number",
+              "units": ""
+            },
+            "id": "858c9224-d3d6-4153-b262-6acd8d5bbd03",
+            "thresholds": [
+              {
+                "type": "GT",
+                "value": 1,
+                "severity": "SEVERE"
+              },
+              {
+                "type": "LT",
+                "value": 0,
+                "severity": "WARN"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "name": "Resource & Crash Metrics",
+      "rows": [
+        [
+          {
+            "name": "Crash Count Heatmap",
+            "description": "",
+            "sources": [
+              {
+                "query": "ts(\"tas.container.crash.count\", foundation=\"$foundation\", org=\"$org\", space=\"$space\", app=\"$app\")",
+                "name": "Crash Count Heatmap",
+                "queryType": "metric"
+              }
+            ],
+            "displaySettings": {
+              "displayType": "heatmap",
+              "units": ""
+            },
+            "id": "6e74a386-df35-413d-95b9-a628d30b2860",
+            "thresholds": []
+          }
+        ],
+        [
+          {
+            "name": "CPU % per Instance",
+            "description": "",
+            "sources": [
+              {
+                "query": "ts(\"tas.container.cpu.percent\", foundation=\"$foundation\", org=\"$org\", space=\"$space\", app=\"$app\")",
+                "name": "CPU % per Instance",
+                "queryType": "metric"
+              }
+            ],
+            "displaySettings": {
+              "displayType": "line",
+              "units": "%"
+            },
+            "id": "c6e06245-656a-43c6-9b5a-2a1abbdc3da8",
+            "thresholds": []
+          },
+          {
+            "name": "Memory % per Instance",
+            "description": "",
+            "sources": [
+              {
+                "query": "ts(\"tas.container.memory.percent\", foundation=\"$foundation\", org=\"$org\", space=\"$space\", app=\"$app\")",
+                "name": "Memory % per Instance",
+                "queryType": "metric"
+              }
+            ],
+            "displaySettings": {
+              "displayType": "line",
+              "units": "%"
+            },
+            "id": "96b738ab-249f-499a-9dc7-35a6078a2071",
+            "thresholds": []
+          },
+          {
+            "name": "Requests per Second",
+            "description": "",
+            "sources": [
+              {
+                "query": "rate(ts(\"tas.container.http.requests.count\", foundation=\"$foundation\", org=\"$org\", space=\"$space\", app=\"$app\"), 1m)",
+                "name": "Requests per Second",
+                "queryType": "metric"
+              }
+            ],
+            "displaySettings": {
+              "displayType": "line",
+              "units": ""
+            },
+            "id": "4d64e073-060a-4b62-a7e7-36c55c4f2443",
+            "thresholds": []
+          }
+        ]
+      ]
+    }
+  ]
+}
