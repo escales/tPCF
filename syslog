@@ -1,0 +1,62 @@
+##############################
+# TEMPLATE WITH TAG INCLUDED
+##############################
+template(name="SyslogForwarderTemplate" type="string"
+  string="<%pri%>%protocol-version% %timestamp:::date-rfc3339% %HOSTNAME% %app-name% - - - [tag:%$!tag%] %msg%\n")
+
+##############################
+# SECURITY EVENTS TO SIEM
+##############################
+
+# --- UAA Security Events ---
+if ($programname == "uaa") and (
+     $msg contains "Audit" or
+     $msg contains "AuthenticationSuccessEvent" or
+     $msg contains "AuthenticationFailureEvent" or
+     $msg contains "TokenIssuedEvent"
+) then {
+    set $!tag = "IP00000041-SEIM-INFO";
+    action(type="omfwd" Target="siem-host.example.com" Port="514" Protocol="udp" template="SyslogForwarderTemplate")
+}
+
+# --- CredHub Security Events ---
+if ($programname == "credhub") and (
+     $msg contains "CredentialAccess" or
+     $msg contains "CredentialUpdate" or
+     $msg contains "PermissionChange"
+) then {
+    set $!tag = "IP00000041-SEIM-INFO";
+    action(type="omfwd" Target="siem-host.example.com" Port="514" Protocol="udp" template="SyslogForwarderTemplate")
+}
+
+# --- Cloud Controller NG Security Events ---
+if ($programname == "cloud_controller_ng") and (
+     $msg contains "audit.app." or
+     $msg contains "audit.user." or
+     $msg contains "audit.space." or
+     $msg contains "audit.service_binding."
+) then {
+    set $!tag = "IP00000041-SEIM-INFO";
+    action(type="omfwd" Target="siem-host.example.com" Port="514" Protocol="udp" template="SyslogForwarderTemplate")
+}
+
+##############################
+# EXISTING FILTERS
+# (General syslog filtering — non-SIEM)
+##############################
+
+if ($programname == "gorouter" and $msg contains "x_cf_routererror:\"-\"") then
+    stop
+else if ($programname == "rep") then
+    stop
+else if ($programname == "telemetry-agent") then
+    stop
+else if ($programname == "cloud_controller_ng") then
+    stop
+else if ($programname == "audispd") then
+    stop
+else if ($programname == "bbs") then
+    stop
+
+# Example: General syslog forwarding (you can modify this line)
+action(type="omfwd" Target="syslog-prod.example.com" Port="514" Protocol="udp" template="SyslogForwarderTemplate")
