@@ -15,7 +15,7 @@ if ($programname == "uaa") and (
      $msg contains "AuthenticationFailureEvent" or
      $msg contains "TokenIssuedEvent"
 ) then {
-    set $!tag = "IP00000041-SEIM-INFO";
+    set $!tag = "MY-TAG";
     action(type="omfwd" Target="siem-host.example.com" Port="514" Protocol="udp" template="SyslogForwarderTemplate")
 }
 
@@ -25,7 +25,7 @@ if ($programname == "credhub") and (
      $msg contains "CredentialUpdate" or
      $msg contains "PermissionChange"
 ) then {
-    set $!tag = "IP00000041-SEIM-INFO";
+    set $!tag = "MY-TAG";
     action(type="omfwd" Target="siem-host.example.com" Port="514" Protocol="udp" template="SyslogForwarderTemplate")
 }
 
@@ -36,7 +36,7 @@ if ($programname == "cloud_controller_ng") and (
      $msg contains "audit.space." or
      $msg contains "audit.service_binding."
 ) then {
-    set $!tag = "IP00000041-SEIM-INFO";
+    set $!tag = "MY-TAG";
     action(type="omfwd" Target="siem-host.example.com" Port="514" Protocol="udp" template="SyslogForwarderTemplate")
 }
 
